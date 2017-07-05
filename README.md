@@ -20,3 +20,5 @@ Description：
 	对比ORW版本:1.5
 
 Change Log：
+	V1.7 TOSSIM仿真头文件TossimRadioMsg.h中，将other1,other2,other3域的类型由
+	uint8_t扩展到uint16_t,以满足程序需求。

@@ -4,7 +4,7 @@
  Created on  2017-06-30 09:11
  
  @author: ytc recessburton@gmail.com
- @version: V1.6
+ @version: V1.7
  
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -192,28 +192,28 @@ implementation {
 	void constructForwardData(bool priority);
 	
 	/**
-	 * 将EDC值从float转换成uint8_t.
+	 * 将EDC值从float转换成uint16_t.
 	 *
-	 * 根据ORW,取edc为0.0-25.5,step 0.1，将其扩大10倍，变成整数，便于填入数据包头部.
+	 * 根据ORW,取edc为0.000-65.535,step 0.001，将其扩大1000倍，变成整数，便于填入数据包头部.
 	 *
 	 * @param edc   float类型的节点edc值
-	 * @return      uint8_t类型的节点edc值
+	 * @return      uint16_t类型的节点edc值
 	 *
 	 * @see resumeEdc()
 	 */
-	inline uint8_t convertEdc2uint(float edc);
+	inline uint16_t convertEdc2uint(float edc);
 	
 	/**
-	 * 将链路质量值从float转换成uint8_t.
+	 * 将链路质量值从float转换成uint16_t.
 	 *
-	 * 将原值乘以255从原有的[0,1]映射到[0,255].
+	 * 将原值乘以65535从原有的[0,1]映射到[0,65535].
 	 *
 	 * @param linkq   float类型的节点linkq值
-	 * @return      uint8_t类型的节点linkq值
+	 * @return      uint16_t类型的节点linkq值
 	 *
 	 * @see resumeLinkQ()
 	 */
-	inline uint8_t convertLinkQ2uint(float linkq);
+	inline uint16_t convertLinkQ2uint(float linkq);
 	
 	/**
 	 * 根据nodeid在邻居集（neighborSet）中查找该数据包.
@@ -341,28 +341,28 @@ implementation {
 	inline bool qualify(float edc);
 	
 	/**
-	 * 将EDC值从uint8_t恢复成float.
+	 * 将EDC值从uint16_t恢复成float.
 	 *
-	 * 将整数形式的edc值恢复float类型，此处仅将其除以10得到.
+	 * 将整数形式的edc值恢复float类型，此处仅将其除以1000得到.
 	 *
-	 * @param intedc   uint8_t类型的节点edc值
+	 * @param intedc   uint16_t类型的节点edc值
 	 * @return float类型的节点edc值     
 	 *
 	 * @see convertEdc2uint()
 	 */
-	inline float resumeEdc(uint8_t intedc);
+	inline float resumeEdc(uint16_t intedc);
 	 
 	/**
-	 * 将链路质量值从uint8_t恢复成float.
+	 * 将链路质量值从uint16_t恢复成float.
 	 *
-	 * 将原值除以255来映射回[0,1].
+	 * 将原值除以65535来映射回[0,1].
 	 *
 	 * @param intlinkq   uint8_t类型的节点链路质量值
 	 * @return float类型的节点链路质量值
 	 *
 	 * @see convertLinkQ2uint()
 	 */
-	inline float resumeLinkQ(uint8_t intlinkq);
+	inline float resumeLinkQ(uint16_t intlinkq);
 	
 	/**
 	 * 构造空的ack包.
@@ -606,6 +606,8 @@ implementation {
  		atomic {
 	 		for(i = 0;i<neighborsize;i++){
 	 				neighbornode = (NeighborSet*)list_get_at(&neighborSet, i);
+	 				if(neighbornode->p == 0.0f)
+	 					continue;
 	 				if(!neighbornode->use)		//只在forwarder集中进行
 	 					break;
 					SigmaPi += neighbornode->p;
@@ -667,7 +669,7 @@ implementation {
 			metadata->ackNode = 0;
 		metadata->other1 = convertEdc2uint(nodeedc);
 		metadata->other2 = sendingdsn;
-		metadata->other3 = (uint8_t)(WAKE_PERIOD_MILLI-300);
+		metadata->other3 = (uint16_t)WAKE_PERIOD_MILLI;
 		dbg("ORWTossimC", "Packet DSN:%d\n",sendingdsn);
 		btrpkt->sourceid = (nx_int8_t)TOS_NODE_ID;
 		btrpkt->index = index;
@@ -705,14 +707,13 @@ implementation {
 				return;
 			neighbornode = (NeighborSet*)malloc(sizeof(NeighborSet));
 			neighbornode->nodeid = nodeid;
-			neighbornode->sleepperiod = sleepperiod;
-			neighbornode->use = (edc <= (nodeedc - WEIGHT)) ? TRUE : FALSE;
 			list_append(&neighborSet, neighbornode);
 			dbg("Neighbor", "%s Add Neighbor %d.\n",sim_time_string(),nodeid);		
 		}
 		neighbornode->edc = edc;
 		neighbornode->sleepperiod = sleepperiod;
 		neighbornode->p = linkq;
+		neighbornode->use = (edc <= nodeedc) ? TRUE : FALSE;
 		//按照EDC值升序排序
 		list_attributes_comparator(&neighborSet, cmpNeighborSetByEDC);//指定比较函数
 		list_sort(&neighborSet, 1);//从小到大排序
@@ -768,7 +769,6 @@ implementation {
 			return -1;
 		forwardBuffer = (DataPayload*)malloc(sizeof(DataPayload));
 		memcpy(forwardBuffer, data, sizeof(DataPayload));
-		forwardBuffer->hops += 1;
 		return 1;
 	}
 	
@@ -795,11 +795,9 @@ implementation {
 			listnode->overheardcount = 1;
 			listnode->forwardcount = method;
 			list_append(&ocl,listnode);
-			dbg("ORWTossimC", "insert OCL f:%d, o:%d\n",listnode->forwardcount, listnode->overheardcount);
 		} else {//已在OCL表中
 			listnode->overheardcount += (int)(method^1);
 			listnode->forwardcount += method;
-			dbg("ORWTossimC", "update OCL f:%d, o:%d\n",listnode->forwardcount, listnode->overheardcount);
 		}
 	}
 	
@@ -809,12 +807,10 @@ implementation {
 		if(TOS_NODE_ID == 1)
 			return 1.0f;
 		if(listnode){
-			dbg("ORWTossimC", "%s linkQ found, f:%d o:%d\n",sim_time_string(),listnode->forwardcount,listnode->overheardcount);
 			if(listnode->overheardcount == 1 && listnode->forwardcount == 0)
 				return 1.0f;
 			return (listnode->forwardcount*1.0f)/(listnode->overheardcount*1.0f);
 		}else{
-			dbg("ORWTossimC", "%s linkQ not found\n",sim_time_string());
 			return 0.0f;
 		}
 	}
@@ -943,7 +939,7 @@ implementation {
 		
 		metadata->other1 = convertEdc2uint(nodeedc);
 		//metadata->other2 中的包识别号保持原有。
-		metadata->other3 = (uint8_t)(WAKE_PERIOD_MILLI-300);
+		metadata->other3 = (uint16_t)WAKE_PERIOD_MILLI;
 		if(priority)
 			metadata->ackNode = 0xFA;//高优先级包，只能sink接收，意在告诉其它节点该包竞争者中存在sink
 		else
@@ -959,8 +955,7 @@ implementation {
 	
 	inline bool qualify(float edc) {
 		//判断接到的包需不需要被转发，本节点比转发一次的代价小，则转发；否则，由本节点不合适转发
-		//注意，此处与节点邻居表中判断是否use的条件正好相反。（ (neighborSet[i].edc <= (nodeedc - WEIGHT))）
-		return (nodeedc <= (edc - WEIGHT));
+		return (nodeedc <= edc);
 	}
 	
 	inline bool cmpDataPayload(const uint8_t nm1, const uint8_t nm2){
@@ -971,6 +966,7 @@ implementation {
 		tossim_metadata_t* metadata = getPktMetadata(msg);
 		uint8_t packetDsn = 0;
 		packetDsn = metadata->other2;
+		dbg("ORWTossimC", "Receive, check is ack needed...\n");
 		if(TOS_NODE_ID == 1)
 			return TRUE;
 		//所接到的包为高优先级包，说明该包是用于包含sink的多个竞争者再次竞争的包，只能由sink接收，无权转发，丢弃
@@ -1118,27 +1114,28 @@ implementation {
 			post forward();
 	}
 	
-	inline uint8_t convertEdc2uint(float edc){
-		//根据ORW,取edc为0.0-25.5,step0.1,转成int
+	inline uint16_t convertEdc2uint(float edc){
+		//根据ORW,取edc为0.000-65.535,step0.1,转成int
 		int intedc = 0;
-		intedc = (int)(edc*10);
-		intedc = (intedc>255) ? 255 : intedc;
-		return (uint8_t)intedc;
+		intedc = (int)(edc*1000);
+		if(edc>65.535f)
+			dbg("ORWTossimC","ERROR EDC=%f > 65.535!\n", edc);
+		intedc = (intedc>65535) ? 65535 : intedc;
+		return (uint16_t)intedc;
 	}
 	
-	inline float resumeEdc(uint8_t intedc){
-		return intedc/10.0f;
+	inline float resumeEdc(uint16_t intedc){
+		return intedc/1000.0f;
 	}
 	
-	inline uint8_t convertLinkQ2uint(float linkq){
-		//映射到[0,255]
-		int intlinkq = (int)(linkq*255);
-		dbg("ORWTossimC","prepare convert linkQ:%f\n", linkq);
-		return (uint8_t)(intlinkq);
+	inline uint16_t convertLinkQ2uint(float linkq){
+		//映射到[0,65535]
+		int intlinkq = (int)(linkq*65535);
+		return (uint16_t)(intlinkq);
 	}
 	
-	inline float resumeLinkQ(uint8_t intlinkq){
-		return intlinkq/255.0f;
+	inline float resumeLinkQ(uint16_t intlinkq){
+		return intlinkq/65535.0f;
 	}
 	
 	inline void noACK(){
@@ -1168,14 +1165,14 @@ implementation {
 			return;
 		metadata->ackNode = (uint8_t)TOS_NODE_ID;
 		metadata->other1 = convertEdc2uint(nodeedc);
-		metadata->other2 = (uint8_t)(WAKE_PERIOD_MILLI-300);//发送sleepperiod,由于uint8_t最大255，所以此处减去基
+		metadata->other2 = (uint16_t)WAKE_PERIOD_MILLI;//发送sleepperiod,由于uint8_t最大255，所以此处减去基
 	}
   
 	event void NeighborDiscovery.AckAddtionalMsg(message_t* ackMessage){	
 		//节点收到其它节点回复自己probe包的ack，提取其中额外的数据
 		tossim_metadata_t* metadata = getPktMetadata(ackMessage);
-		float ackedc =  metadata->other1/10.0f;
-		int sleepperiod = metadata->other2+300;
+		float ackedc =  resumeEdc(metadata->other1);
+		int sleepperiod = metadata->other2;
 		//收到ack后应用层所做的操作
 		updateNeighborSet(metadata->ackNode, ackedc, 1.0f, sleepperiod);
 		SETFLAG(flags, INITIALIZED);
@@ -1193,8 +1190,8 @@ implementation {
 		metadata->ackNode = (uint8_t)TOS_NODE_ID;
 		metadata->other1 = convertEdc2uint(nodeedc);
 		metadata->other2 = convertLinkQ2uint(getLinkQ(getPktMessageSource(msg)));
-		metadata->other3 = (uint8_t)(WAKE_PERIOD_MILLI - 300);
-		dbg("ORWTossimC","prepare ack, linkq:%d\n", metadata->other2);
+		metadata->other3 = (uint16_t)WAKE_PERIOD_MILLI;
+		dbg("ORWTossimC","prepare ack, linkq:%f\n", resumeLinkQ(metadata->other2));
 		post startForwardRequestPause();
 	}
   
@@ -1208,7 +1205,7 @@ implementation {
 			return;
 		requesterEdc = resumeEdc(metadata->other1);
 		requesterLinkQ = resumeLinkQ(metadata->other2);
-		sleepperiod = metadata->other3 + 300;
+		sleepperiod = metadata->other3;
 		dbg("ORWTossimC", "rcv ack from: %d\n",requester);
 		if((NULL == requester) || (requester == 0)){
 			return;
