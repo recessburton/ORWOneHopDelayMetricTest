@@ -17,7 +17,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 
 Description：
 	新提出的协议的Tossim仿真模拟实现.
-	对比ORW版本:1.5
+	对比ORW版本:1.6
 
 Change Log：
 	V1.7 TOSSIM仿真头文件TossimRadioMsg.h中，将other1,other2,other3域的类型由

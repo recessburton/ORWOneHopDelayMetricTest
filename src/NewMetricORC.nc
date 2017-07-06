@@ -606,10 +606,10 @@ implementation {
  		atomic {
 	 		for(i = 0;i<neighborsize;i++){
 	 				neighbornode = (NeighborSet*)list_get_at(&neighborSet, i);
-	 				if(neighbornode->p == 0.0f)
-	 					continue;
 	 				if(!neighbornode->use)		//只在forwarder集中进行
 	 					break;
+	 				if(neighbornode->p == 0.0f)
+	 					continue;
 					SigmaPi += neighbornode->p;
 					WeighedSigmaPi += neighbornode->p * neighbornode->edc;
 			}
@@ -803,15 +803,20 @@ implementation {
 	
 	float getLinkQ(uint8_t nodeid){
 		overheardcountlistnode *listnode = NULL;
+		float linkq=0.0f;
 		listnode = findinOCL(nodeid);
 		if(TOS_NODE_ID == 1)
 			return 1.0f;
 		if(listnode){
+			dbg("ORWTossimC", "f:%d, o:%d\n", listnode->forwardcount, listnode->overheardcount);
 			if(listnode->overheardcount == 1 && listnode->forwardcount == 0)
 				return 1.0f;
-			return (listnode->forwardcount*1.0f)/(listnode->overheardcount*1.0f);
+			linkq = (listnode->forwardcount*1.0f)/(listnode->overheardcount*1.0f);
+			linkq = linkq > 1 ? 1:linkq;
+			linkq = linkq <= 0 ? (1.0f/65535.0f):linkq;//用最小的float来代替0，此处考虑到后续将转换到uint16_t
+			return linkq;
 		}else{
-			return 0.0f;
+			return (1.0f/65535.0f);
 		}
 	}
 	
@@ -883,6 +888,8 @@ implementation {
 		for (tick=1; tick<MAX_REPLICA_COUNT*PACKET_DUPLICATE_MILLI; tick++){
 			for (nodei=0; nodei<list_size(&neighborSet); nodei++){
 				neighbornode = (NeighborSet*)list_get_at(&neighborSet, nodei);
+				if (neighbornode->use == 0)
+					continue;
 				if (tick % neighbornode->sleepperiod == 0){
 					list_append(&brother, neighbornode);
 				}
@@ -1131,11 +1138,19 @@ implementation {
 	inline uint16_t convertLinkQ2uint(float linkq){
 		//映射到[0,65535]
 		int intlinkq = (int)(linkq*65535);
+		if(intlinkq>65535){
+			intlinkq = 65535;
+			dbg("ORWTossimC","ERROR linkq=%d > 65535!\n", linkq);
+		}
+		if(intlinkq<0){
+			intlinkq = 0;
+			dbg("ORWTossimC","ERROR linkq=%d < 0!\n", linkq);
+		}
 		return (uint16_t)(intlinkq);
 	}
 	
 	inline float resumeLinkQ(uint16_t intlinkq){
-		return intlinkq/65535.0f;
+		return ((float)intlinkq)/65535.0f;
 	}
 	
 	inline void noACK(){
