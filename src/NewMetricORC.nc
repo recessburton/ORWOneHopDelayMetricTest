@@ -1,11 +1,11 @@
 /**
  Copyright (C),2014-2017, YTC, www.bjfulinux.cn
  Copyright (C),2014-2017, ENS Lab, ens.bjfu.edu.cn
- Created on  2017-06-30 09:11
- 
+ Created on  2017-07-31 09:11
+
  @author: ytc recessburton@gmail.com
  @version: V1.7
- 
+
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -69,21 +69,21 @@ implementation {
 	int WAKE_PERIOD_MILLI=WAKE_PERIOD_MILLI_BASE;//节点休眠周期
 	message_t pkt;
 	unsigned char flags;//标志位，与掩码运算可知相应位置是否置位
-	volatile float nodeedc;
+	float nodeedc;
 	uint16_t index = 0;	//数据包序号
 	uint16_t sendingdsn = 0;
 	bool judge = FALSE;
 	bool sinkacked = FALSE;
 	bool isForwardRequest = FALSE;
 	uint8_t lastforwarderid = 0;
-	volatile bool shouldAck=TRUE;
+	bool shouldAck=TRUE;
 	DataPayload * forwardBuffer = NULL;//作为下游节点暂存刚接到拟转发的包
 	uint16_t currentForwardingDsn = 0;//当前正在转发或正在请求中的包识别号
 	int vacantAckOffset = 0;
-	float onehopdelay=0.0f;//本节点单跳时间延迟
-	
+	int energy = 0;//节点能耗，每收发一次+1
+
 	list_t ocl;//overheardcountlistnode表，overheard计数表，记录overheard到某个节点的次数以及其中转发的次数，用于计算Linkquality
-	
+
 	/**
 	 * 获取消息包的头部.
 	 *
@@ -95,7 +95,7 @@ implementation {
 	inline tossim_header_t* getPktHeader(message_t* amsg) {
     	return (tossim_header_t*)(amsg->data - sizeof(tossim_header_t));
     }
-  
+
     /**
 	 * 获取消息包的metadata域.
 	 *
@@ -107,7 +107,7 @@ implementation {
 	inline tossim_metadata_t* getPktMetadata(message_t* amsg) {
     	return (tossim_metadata_t*)(&amsg->metadata);
 	}
-	
+
 	/**
 	 * 获取包的源地址.
 	 *
@@ -115,14 +115,14 @@ implementation {
 	 *
 	 * @param msg   数据包指针
 	 * @return    发送方节点号
-	 * 
+	 *
 	 * @see	_getHeader()
 	 */
 	inline uint8_t getPktMessageSource(message_t* msg){
 		tossim_header_t* header = getPktHeader(msg);
 		return (uint8_t)header->src;
 	}
-	
+
 	/**
 	 * 将接收到的消息包加入消息缓存区.
 	 *
@@ -134,11 +134,10 @@ implementation {
 	 * @see element_comparator()
 	 */
 	int addToBuffer(const DataPayload* data);
-	
+
 	/**
 	 * 计算整体上的单跳链路质量.
-	 *
-	 * 根据计算公式：P = SIGMA(pi*PI(1-pk)/(1-pi)), i=1..n, k=1..n, see.<单条链路时间延迟metric实验需求2016-08-14>.
+	 * 根据计算公式：P = 1-PI(1-pi), i=1..n, k=1..n, see.<单条链路时间延迟metric实验需求2016-08-14>.
 	 *
 	 * @param listpointer   链表指针
 	 * @return      最终的链路质量值
@@ -146,7 +145,7 @@ implementation {
 	 * @see pi()
 	 */
 	float callinkquality(list_t *listpointer);
-	
+
 	/**
 	 * 对比两个DataPayload（转发中的数据包），是否出自同一节点的同一数据包.
 	 *
@@ -157,7 +156,7 @@ implementation {
 	 * @return      相同则返回TRUE，否则返回FALSE
 	 */
 	inline bool cmpDataPayload(const uint8_t nm1, const uint8_t nm2);
-	
+
 	/**
 	 * 两个NeighborSet结构体的比较函数.
 	 *
@@ -168,29 +167,29 @@ implementation {
 	 * @return    a>b则返回-1，否则返回1
 	 */
 	int cmpNeighborSetByEDC(const void* a, const void* b);
-	
+
 	/**
 	 * 构造数据负载包中的数据.
 	 *
 	 * 模拟应用层数据负载的产生，填入例如包序号等数据.
 	 *
 	 * @param priority   是否产生高优先级包
-	 * 
+	 *
 	 * @see convertEdc2uint()
 	 */
 	void constructData(bool priority);
-	
+
 	/**
 	 * 构造要转发的数据包中的数据.
 	 *
 	 * 将接收到的数据包从缓存取出，修改包中的信息，准备转发.
 	 *
 	 * @param priority   是否产生高优先级包
-	 * 
+	 *
 	 * @see convertEdc2uint()
 	 */
 	void constructForwardData(bool priority);
-	
+
 	/**
 	 * 将EDC值从float转换成uint16_t.
 	 *
@@ -202,7 +201,7 @@ implementation {
 	 * @see resumeEdc()
 	 */
 	inline uint16_t convertEdc2uint(float edc);
-	
+
 	/**
 	 * 将链路质量值从float转换成uint16_t.
 	 *
@@ -214,7 +213,7 @@ implementation {
 	 * @see resumeLinkQ()
 	 */
 	inline uint16_t convertLinkQ2uint(float linkq);
-	
+
 	/**
 	 * 根据nodeid在邻居集（neighborSet）中查找该数据包.
 	 *
@@ -226,7 +225,7 @@ implementation {
 	 * @see matchIDinNeighborSet()
 	 */
 	NeighborSet* findinNeighborSet(uint8_t nodeid);
-	
+
 	/**
 	 * 根据nodeid在OCL中查找该数据包.
 	 *
@@ -238,7 +237,7 @@ implementation {
 	 * @see matchIDinOCL()
 	 */
 	overheardcountlistnode* findinOCL(uint8_t nodeid);
-	
+
 	/**
 	 * 获取本节点转发率.
 	 *
@@ -247,7 +246,7 @@ implementation {
 	 * @return  本节点转发率
 	 */
 	inline float getForwardingRate();
-	
+
 	/**
 	 * 根据nodeid获取该节点与本节点间链路质量.
 	 *
@@ -260,7 +259,7 @@ implementation {
 	 * @see findinOCL()
 	 */
 	float getLinkQ(uint8_t nodeid);
-	
+
 	/**
 	 * 判断是否需要回复ack.
 	 *
@@ -276,7 +275,7 @@ implementation {
 	 * @see clearBuffer()
 	 */
 	bool isAckNeeded(message_t* msg);
-	
+
 	/**
 	 * 判断该ack的事件触发是否是我们关注的消息类型.
 	 *
@@ -288,7 +287,7 @@ implementation {
 	 * @return      是否Data类型的数据包
 	 */
 	bool isDataAck(message_t* msg);
-	
+
 	/**
 	 * 在NeighborSet中判断两个数据包是否为同一节点发出的包.
 	 *
@@ -299,7 +298,7 @@ implementation {
 	 * @return    如果相同返回0，否则返回1（注意，如果用在标准GCC编译器，则需要相反的值，相同返1，否则返0）
 	 */
 	int matchIDinNeighborSet(const void* a, const void* b);
-	
+
 	/**
 	 * 在OCL中判断两个数据包是否为同一节点发出的包.
 	 *
@@ -310,25 +309,24 @@ implementation {
 	 * @return    如果相同返回0，否则返回1（注意，如果用在标准GCC编译器，则需要相反的值，相同返1，否则返0）
 	 */
 	int matchIDinOCL(const void* a, const void* b);
-	
+
 	/**
 	 * 标记以不接收数据包.
 	 *
 	 * 节点在ack回复时回复的是空ack（形式上的），所以标记应用层不需要接收.
 	 */
 	inline void noACK();
-	
+
 	/**
 	 * 获取失败概率的连乘值.
 	 *
-	 * 递归计算(1-p1)*(1-p2)*(1-p3).....
+	 * 计算(1-p1)*(1-p2)*(1-p3).....
 	 *
-	 * @param product   函数的产出，乘积，递归参数
 	 * @param listpointer  链表指针
 	 * @return product   乘积，递归参数
 	 */
-	float pi(float product, list_t *listpointer);
-	
+	float pi(list_t *listpointer);
+
 	/**
 	 * 根据本节点的edc值判断接到的包是否值得被转发.
 	 *
@@ -339,19 +337,19 @@ implementation {
 	 * @return      可以转发则返回TRUE，否则返回FALSE
 	 */
 	inline bool qualify(float edc);
-	
+
 	/**
 	 * 将EDC值从uint16_t恢复成float.
 	 *
 	 * 将整数形式的edc值恢复float类型，此处仅将其除以1000得到.
 	 *
 	 * @param intedc   uint16_t类型的节点edc值
-	 * @return float类型的节点edc值     
+	 * @return float类型的节点edc值
 	 *
 	 * @see convertEdc2uint()
 	 */
 	inline float resumeEdc(uint16_t intedc);
-	 
+
 	/**
 	 * 将链路质量值从uint16_t恢复成float.
 	 *
@@ -363,7 +361,7 @@ implementation {
 	 * @see convertLinkQ2uint()
 	 */
 	inline float resumeLinkQ(uint16_t intlinkq);
-	
+
 	/**
 	 * 构造空的ack包.
 	 *
@@ -375,6 +373,13 @@ implementation {
 	 */
 	void setVacantAck(message_t* msg);
 	
+	/**
+	 * 更新节点的EDC值.
+	 *
+	 * 根据ORW文中的方式，根据转发集，计算并更新本节点的EDC值.
+	 */
+	 void updateEDC();
+
 	/**
 	 * 更新邻居节点集合中对应节点的参数.
 	 *
@@ -388,7 +393,7 @@ implementation {
 	 * @see findinNeighborSet()
 	 */
 	void updateNeighborSet(uint8_t nodeid, float edc, float linkq, int sleepperiod);
-	
+
 	/**
 	 * 更新OCL列表.
 	 *
@@ -401,16 +406,20 @@ implementation {
 	 * @see findinOCL()
 	 */
 	void updateOCL(uint8_t nodeid, int method);
-	
+
 	/**
 	 * 根据提出的metric计算单跳链路延迟.
 	 *
 	 * 计算方式见<单条链路时间延迟metric实验需求2016-08-14>
 	 *
+	 * @param neighborNo 当前需要计算的邻居节点数
+	 *
+	 * @return 返回单跳链路质量值
+	 *
 	 * @see callinkquality()
 	 */
-	void updateOneHopDelay();
-	
+	float updateOneHopDelay(int neighborNo);
+
 	/**
 	 * 清空消息缓存区.
 	 *
@@ -422,7 +431,7 @@ implementation {
 			forwardBuffer = NULL;
 		}
 	}
-	
+
 	/**
 	 * 结束产生数据包的任务.
 	 *
@@ -437,7 +446,7 @@ implementation {
 		call SeedInit.init((uint16_t)sim_time());
 		call packetTimer.startOneShot(PAYLOAD_PERIOD_MILLI+((unsigned int)call Random.rand16())/100+TOS_NODE_ID%10);
 	}
-	
+
 	/**
 	 * 结束当前数据包转发任务.
 	 *
@@ -458,7 +467,7 @@ implementation {
 		if(!call wakeTimer.isRunning())
 			signal wakeTimer.fired();
 	}
-	
+
 	/**
 	 * 向下游转发缓存中的数据包.
 	 *
@@ -470,13 +479,13 @@ implementation {
 	task void forward() {
 		bool priority = FALSE;
 		bool readyToEndForwardTask = FALSE;
-		
+
 		if(!call wakeTimer.isRunning()){//节点已经用完醒了的时间，立刻休眠
 			post endForwardTask();
 			signal wakeTimer.fired();
 			return;
 		}
-		
+
 		do{
 			if(forwardreplicacount > MAX_REPLICA_COUNT){
 				if(judge){
@@ -485,21 +494,21 @@ implementation {
 					priority = TRUE;
 					readyToEndForwardTask = TRUE;
 					break;
-				}else{				
+				}else{
 					dbg("ORWTossimC", "%s ERROR max_replica_#_reached due to no-ack\n",sim_time_string());
 				}
 				post endForwardTask();
 				return;
 			}
 		}while(0);
-		
+
 		if(sinkacked){
 			priority = TRUE;
 			readyToEndForwardTask = TRUE;
 			dbg("ORWTossimC", "%s REPLICA# %d\n",sim_time_string(),forwardreplicacount);
 		}
 		constructForwardData(priority);
-		
+
 		if(readyToEndForwardTask)
 			post endForwardTask();
 		vacantAckOffset = 0;
@@ -507,7 +516,7 @@ implementation {
 		call ACKs.requestAck(&pkt);
 		call AMSend.send(AM_BROADCAST_ADDR, &pkt, sizeof(DataPayload));
 	}
-	
+
 	/**
 	 * 发送模拟的数据负载包.
 	 *
@@ -520,13 +529,13 @@ implementation {
 		//产生周期性的数据，用于模拟数据负载
 		bool priority = FALSE;
 		bool readyToEndDataTask = FALSE;
-		
+
 		do{//此处使用do while0，方便执行时跳出，避免使用goto语句
 			if(msgreplicacount > MAX_REPLICA_COUNT){//超过最大重复发送次数限制
 				if(judge){
 					//！！！！！！存在竞争者，此时如果结束数据包的发送，那么会导致所有竞争者认为自己取得转发权！！！！！
 					//（**************************待解决****************************）
-					//此处采取方案：发送一个高优先级包，是的所有竞争者都不接收
+					//此处采取方案：发送一个高优先级包，使得所有竞争者都不接收
 					//备用方案一：选取竞争者中edc最小的，指派转发者
 					//备用方案二：在每次重复包发送过程中，都丢弃一个edc最大的，使每次都有落选的
 					judge = FALSE;
@@ -541,7 +550,7 @@ implementation {
 				return;
 			}
 		}while(0);
-		
+
 		//sink节点已经发送了ack
 		if(sinkacked){
 			priority = TRUE;
@@ -549,19 +558,19 @@ implementation {
 			dbg("ORWTossimC", "%s REPLICA# %d\n",sim_time_string(),msgreplicacount);
 		}
 		constructData(priority);
-		
+
 		msgreplicacount += 1;
-		
+
 		if(readyToEndDataTask)
 			post endDataTask();
-			
+
 		dbg("ORWTossimC", "send data\n");
-		
+
 		vacantAckOffset = 0;
 		call ACKs.requestAck(&pkt);
 		call AMSend.send(AM_BROADCAST_ADDR, &pkt, sizeof(DataPayload));
 	}
-	
+
 	/**
 	 * 开始节点周期性的Duty Cycle.
 	 *
@@ -578,7 +587,7 @@ implementation {
 			}
 		}
 	}
-	
+
 	/**
 	 * 开始转发数据包前的等待.
 	 *
@@ -590,45 +599,45 @@ implementation {
 		call forwardPauseTimer.startOneShot(160);
 	}
 
-	/**
-	 * 更新节点的EDC值.
-	 *
-	 * 根据ORW文中的方式，根据转发集，计算并更新本节点的EDC值.
-	 */
-	task void updateEDC(){
+	void updateEDC(){
 		//计算新的metric值，此处也用EDC这个名字
 		int i;
+		int maxForwarderNo = 0;
 		float SigmaPi = 0.0f;
-		float WeighedSigmaPi = 0.0f;	
+		float WeighedSigmaPi = 0.0f;
 		int neighborsize = list_size(&neighborSet);
 		NeighborSet *neighbornode = NULL;
-		updateOneHopDelay();
- 		atomic {
-	 		for(i = 0;i<neighborsize;i++){
-	 				neighbornode = (NeighborSet*)list_get_at(&neighborSet, i);
-	 				if(!neighbornode->use)		//只在forwarder集中进行
-	 					break;
-	 				if(neighbornode->p == 0.0f)
-	 					continue;
+		float onehopdelay = 0;
+		float currentedc = FLT_MAX;
+		bool cal = TRUE;
+		if(neighborsize >= 1)
+			nodeedc = FLT_MAX;
+ 		for(i = 0;i<neighborsize;i++){
+				currentedc = FLT_MAX;
+				neighbornode = (NeighborSet*)list_get_at(&neighborSet, i);
+				if(cal){		
 					SigmaPi += neighbornode->p;
+					if(SigmaPi<=0)
+						return;
 					WeighedSigmaPi += neighbornode->p * neighbornode->edc;
-			}
-			if(SigmaPi<=0)
-				return;
-			//nodeedc = 1.0f/SigmaPi + WeighedSigmaPi/SigmaPi + WEIGHT; //ORW公式
-			nodeedc = onehopdelay + WeighedSigmaPi/SigmaPi;
+					onehopdelay = updateOneHopDelay(i);
+					currentedc = onehopdelay + WeighedSigmaPi/SigmaPi;
+				}
+				if(currentedc < nodeedc){
+					nodeedc = currentedc;
+					neighbornode->use = TRUE;
+					maxForwarderNo = i+1;
+				}else{
+					cal = FALSE;
+					neighbornode->use = FALSE;
+				}
+				dbg("Neighbor", "NeighborSet #%d:Node %d, EDC %f, LQ %f, is use:%d\n",i+1,neighbornode->nodeid,neighbornode->edc,neighbornode->p,neighbornode->use);
 		}
-		//打印邻居集，判定forwarderSet资格
-		dbg("Neighbor", "%s The node EDC is %f.\n",sim_time_string(),nodeedc);
-		for(i = 0;i<neighborsize;i++){
-			neighbornode = (NeighborSet*)list_get_at(&neighborSet, i);
-			neighbornode->use = (neighbornode->edc <= nodeedc) ? TRUE : FALSE;
-			dbg("Neighbor", "NeighborSet #%d:Node %d, EDC %f, LQ %f, is use:%d\n",i+1,neighbornode->nodeid,neighbornode->edc,neighbornode->p,neighbornode->use);
-		}
+		dbg("Neighbor", "%s Node EDC %f, maxForwarderNo %d.\n",sim_time_string(),nodeedc,maxForwarderNo);
 		neighbornode = NULL;
 	}
-	
-	
+
+
 	event void Boot.booted(){
 		flags = 0x0;//初始化标志位
 		call SeedInit.init((uint16_t)sim_time());
@@ -649,7 +658,7 @@ implementation {
 		nodeedc = (TOS_NODE_ID ==1) ? 0.0f : FLT_MAX;
 		list_init(&ocl);
 	}
-	
+
 	void constructData(bool priority){
 		DataPayload * btrpkt = NULL;
 		message_t* pktp = &pkt;
@@ -677,54 +686,50 @@ implementation {
 		sinkacked = FALSE;
 		return;
 	}
-	
-	int cmpNeighborSetByEDC(const void *a ,const void *b){
+
+	int cmpNeighborSetByEDC(const void *a, const void *b){
 		//使用simclist库中list_sort()函数所用的比较函数element_comparator
 		return (*(NeighborSet *)a).edc > (*(NeighborSet *)b).edc ? -1 : 1;
 	}
-	
+
 	int matchIDinNeighborSet(const void *el, const void *indicator){
 		return (*(NeighborSet *)el).nodeid == *(int*)indicator ? 1 : 0;
 	}
-	
+
 	NeighborSet* findinNeighborSet(uint8_t nodeiduint){
 		NeighborSet *listnode = NULL;
 		int nodeid = (int)nodeiduint;
 		list_attributes_seeker(&neighborSet, matchIDinNeighborSet);//指定查找匹配函数
 		listnode = list_seek(&neighborSet, &nodeid);
-		if(listnode)
-			dbg("Neighbor", "%s finding Neighbor set: %d.\n",sim_time_string(),nodeid);
-		else if(listnode == NULL)
-			dbg("Neighbor", "%s not found in Neighbor set: %d.\n",sim_time_string(),nodeid);
 		return listnode;
 	}
-	
+
 	void updateNeighborSet(uint8_t nodeid, float edc, float linkq, int sleepperiod){
 		NeighborSet* neighbornode = findinNeighborSet(nodeid);
-		dbg("ORWTossimC", "updateNeighborSet\n");
 		if(!neighbornode){
 			if(list_size(&neighborSet)>255)
 				return;
 			neighbornode = (NeighborSet*)malloc(sizeof(NeighborSet));
 			neighbornode->nodeid = nodeid;
 			list_append(&neighborSet, neighbornode);
-			dbg("Neighbor", "%s Add Neighbor %d.\n",sim_time_string(),nodeid);		
 		}
 		neighbornode->edc = edc;
 		neighbornode->sleepperiod = sleepperiod;
 		neighbornode->p = linkq;
-		neighbornode->use = (edc <= nodeedc) ? TRUE : FALSE;
 		//按照EDC值升序排序
 		list_attributes_comparator(&neighborSet, cmpNeighborSetByEDC);//指定比较函数
 		list_sort(&neighborSet, 1);//从小到大排序
 		if(TOS_NODE_ID != 1)
-			post updateEDC();
+			updateEDC();
 		neighbornode = NULL;
 		return;
 	}
 
 	event void AMSend.sendDone(message_t * msg, error_t err) {
 		int acks=0;
+		energy++;
+		if(energy % 10 == 0)
+			dbg("Radio", "%s ENERGY %d.\n",sim_time_string(), energy);
 		acks = (call ACKs.wasAcked(msg)) - vacantAckOffset;
 		if(acks > 1){
 			//存在多个ack,重新发送数据包来重新发起竞争。(*如果超过最大重复次数，则指定edc最小者转发该数据包。待定)
@@ -771,18 +776,18 @@ implementation {
 		memcpy(forwardBuffer, data, sizeof(DataPayload));
 		return 1;
 	}
-	
+
 	int matchIDinOCL(const void *el, const void *indicator){
 		//使用simclist库中的比较函数element_comparator，用于在队列里查找
 		return (*(overheardcountlistnode *)el).nodeid == *(int*)indicator ? 1 : 0;
 	}
-	
+
 	overheardcountlistnode *findinOCL(uint8_t nodeiduint){
 		int nodeid = (int)nodeiduint;
 		list_attributes_seeker(&ocl, matchIDinOCL);
 		return list_seek(&ocl, &nodeid);
 	}
-	
+
 	void updateOCL(uint8_t nodeid, int method){
 		//method为0表示overheard增加一次，1表示forward增加一次
 		overheardcountlistnode *listnode = NULL;
@@ -800,102 +805,68 @@ implementation {
 			listnode->forwardcount += method;
 		}
 	}
-	
+
 	float getLinkQ(uint8_t nodeid){
 		overheardcountlistnode *listnode = NULL;
-		float linkq=0.0f;
 		listnode = findinOCL(nodeid);
 		if(TOS_NODE_ID == 1)
 			return 1.0f;
 		if(listnode){
-			dbg("ORWTossimC", "f:%d, o:%d\n", listnode->forwardcount, listnode->overheardcount);
 			if(listnode->overheardcount == 1 && listnode->forwardcount == 0)
 				return 1.0f;
-			linkq = (listnode->forwardcount*1.0f)/(listnode->overheardcount*1.0f);
-			linkq = linkq > 1 ? 1:linkq;
-			linkq = linkq <= 0 ? (1.0f/65535.0f):linkq;//用最小的float来代替0，此处考虑到后续将转换到uint16_t
-			return linkq;
+			return (listnode->forwardcount*1.0f)/(listnode->overheardcount*1.0f);
 		}else{
-			return (1.0f/65535.0f);
+			dbg("ORWTossimC", "ERROR when get linkq!\n");
+			return 0.0f;
 		}
 	}
-	
-	float pi(float product, list_t *listpointer){//获取失败概率连乘：(1-p1)*(1-p2)*(1-p3)....
-		float probability;
-		list_t emptylist;
-		list_t copiedlist;
-		list_init(&emptylist);
-		list_init(&copiedlist);
-		list_concat(&emptylist, listpointer, &copiedlist);//Copy listpointer to copiedlist
-		list_clear(&emptylist);
-		if (list_size(&copiedlist) == 0)
-			return product;
-		probability = (*(NeighborSet*)list_get_at(&copiedlist, 0)).p;
-		if(probability != 1)//put p=1 aside, for fear the product would always be 0.
+
+	float pi(list_t *listpointer){//获取失败概率连乘：(1-p1)*(1-p2)*(1-p3)....
+		float probability = 0.0f;
+		int nodep = 0;
+		float product = 1.0f;
+		for (nodep=0; nodep<list_size(listpointer); nodep++){
+			probability = *(float*)list_get_at(listpointer, nodep);
 			product *= (1-probability);
-		list_delete_at(&copiedlist, 0);
-		pi(product, &copiedlist);
-		list_clear(&copiedlist);
+		}
 		return product;
 	}
-	
+
 	float callinkquality(list_t *listpointer){
 		/*formula：
-		 * P = SIGMA(pi*PI(1-pk)/(1-pi)), i=1..n, k=1..n, see.<单条链路时间延迟metric实验需求2016-08-14>
+		 * P = 1-PI(1-pi), i=1..n, k=1..n, see.<单条链路时间延迟metric实验需求2016-08-14>
 		 * */
-		list_t emptylist;
-		list_t copiedlist;
-		float sum=0;
-		float product=1;
-		float probability=0;
-		int i; 
-		
-		list_init(&emptylist);
-		list_init(&copiedlist);
-		list_concat(&emptylist, listpointer, &copiedlist);//Copy listpointer to copiedlist
-		list_destroy(&emptylist);
-		product = pi(1, &copiedlist);
-		if(&copiedlist!=NULL)
-			list_destroy(&copiedlist);
-		for (i=0; i<list_size(listpointer); i++){
-			probability = (*(NeighborSet*)list_get_at(listpointer, i)).p;
-			if (probability == 1){	//if p=1,the other partition of summation,(1-1) included,is 0, so sum=1*(1-p1)(1-p2)...(1-pk)=1*product.
-				sum = product;
-				break;
-			}else
-				sum += probability * product / (1-probability);
-		}
-		return sum;
+		return 1 - pi(listpointer);
 	}
-	
-	void updateOneHopDelay(){
+
+	float updateOneHopDelay(int neighborNo){
 		int tick,nodei,i,lasttick=0;
-		list_t brother;//共有周期邻居列表
-		list_t qualitylist;//Qs:在节点的时序上各个邻居节点的链路质量序列，最大MAX_REPLICA_COUNT+1
-		//list_t awaketimelist;//As:节点的时序上，有邻居节点醒来的时刻序列，最大MAX_REPLICA_COUNT+1
-		list_t timeintervallist;//Is:As的一阶差分，有节点醒来的时间间隔，最大MAX_REPLICA_COUNT+1
+		list_t brother;//在某时刻具有共同唤醒时间的邻居的链路质量概率列表
+		list_t qualitylist;//Qs:在节点的时序上各个邻居节点的链路质量序列，考察时间范围MAX_REPLICA_COUNT*SLEEP_PERIOD_MILLI
+		//list_t awaketimelist;//As:节点的时序上，有邻居节点醒来的时刻序列，考察时间范围MAX_REPLICA_COUNT*SLEEP_PERIOD_MILLI
+		list_t timeintervallist;//Is:As的一阶差分，有节点醒来的时间间隔，考察时间范围MAX_REPLICA_COUNT*SLEEP_PERIOD_MILLI
 		float probability=0.0f;
 		int timeinterval=0;
 		float averageQs=0.0f;
 		float averageIs=0.0f;
 		int sumIs=0;
 		float sumQs=0.0f;
+		float onehopdelay = 0.0f;
 		NeighborSet *neighbornode = NULL;
-		
+
 		list_init(&brother);
 		list_init(&qualitylist);
 		list_init(&timeintervallist);
-		for (tick=1; tick<MAX_REPLICA_COUNT*PACKET_DUPLICATE_MILLI; tick++){
-			for (nodei=0; nodei<list_size(&neighborSet); nodei++){
+		for (tick=1; tick<MAX_REPLICA_COUNT*SLEEP_PERIOD_MILLI; tick++){
+			for (nodei=0; nodei<=neighborNo; nodei++){
 				neighbornode = (NeighborSet*)list_get_at(&neighborSet, nodei);
-				if (neighbornode->use == 0)
-					continue;
 				if (tick % neighbornode->sleepperiod == 0){
-					list_append(&brother, neighbornode);
+					if(neighbornode->p > 0)
+						list_append(&brother, &(neighbornode->p));//本时刻该节点唤醒，加入brother
 				}
 			}
 			neighbornode = NULL;
-			if( !list_isempty(&brother)){
+			if( !list_isempty(&brother)){//在这个时刻，有多个节点同时醒来，计算联合概率
 				//Calculate & append Is:
 				probability = callinkquality(&brother);
 				list_append(&qualitylist, &probability);
@@ -905,45 +876,45 @@ implementation {
 				lasttick = tick;
 				list_append(&timeintervallist, &timeinterval);
 			}
-			list_clear(&brother);		
+			list_clear(&brother);
 		}
 		list_destroy(&brother);
-		
+
 		//calculate one hop delay
 		//formula: avg(Is)/avg(Qs)-avg(Is)/2
 		for (i=0;i<list_size(&qualitylist);i++){
 			sumQs += *(float*)list_get_at(&qualitylist, i);
 		}
 		averageQs = sumQs/list_size(&qualitylist);
-		
+
 		for (i=0;i<list_size(&timeintervallist);i++){
 			timeinterval = *(int*)list_get_at(&timeintervallist, i);
 			sumIs += timeinterval;
 		}
 		averageIs = sumIs*1.0f/list_size(&timeintervallist);
-		
+
 		onehopdelay = (averageIs/averageQs - averageIs/2.0f)/1000;//此处转为秒
-		
+
 		list_destroy(&qualitylist);
-		list_destroy(&timeintervallist);	
+		list_destroy(&timeintervallist);
 		////////////////////////////DEBUG/////////////////////////
 		dbg("debug", "avgIs:%f,avgQs:%f,delay:%f\n",averageIs,averageQs,onehopdelay);
-		//////////////////////////////////////////////////////////	
+		//////////////////////////////////////////////////////////
+		return onehopdelay;
 	}
-	
+
 	void constructForwardData(bool priority){
 		DataPayload *btrpkt = (DataPayload * )(call Packet.getPayload(&pkt,sizeof(DataPayload)));
 		DataPayload *datatoforward = NULL;
 		message_t* pktp = &pkt;
 		tossim_metadata_t* metadata = getPktMetadata(pktp);
-		dbg("Probe","construct forward ack\n");
-		
+
 		datatoforward = forwardBuffer;
 		if(datatoforward == NULL)
 			return;
 		forwardreplicacount++;
 		memcpy(btrpkt, datatoforward, sizeof(DataPayload));
-		
+
 		metadata->other1 = convertEdc2uint(nodeedc);
 		//metadata->other2 中的包识别号保持原有。
 		metadata->other3 = (uint16_t)WAKE_PERIOD_MILLI;
@@ -959,21 +930,20 @@ implementation {
 			dbg("ORWTossimC", "%s FORWARD %d %d %d\n",sim_time_string(), btrpkt->sourceid,btrpkt->index,btrpkt->hops);
 		}
 	}
-	
+
 	inline bool qualify(float edc) {
 		//判断接到的包需不需要被转发，本节点比转发一次的代价小，则转发；否则，由本节点不合适转发
 		return (nodeedc <= edc);
 	}
-	
+
 	inline bool cmpDataPayload(const uint8_t nm1, const uint8_t nm2){
 		return (nm1 == nm2);
 	}
-	
+
 	bool isAckNeeded(message_t* msg){
 		tossim_metadata_t* metadata = getPktMetadata(msg);
 		uint8_t packetDsn = 0;
 		packetDsn = metadata->other2;
-		dbg("ORWTossimC", "Receive, check is ack needed...\n");
 		if(TOS_NODE_ID == 1)
 			return TRUE;
 		//所接到的包为高优先级包，说明该包是用于包含sink的多个竞争者再次竞争的包，只能由sink接收，无权转发，丢弃
@@ -994,7 +964,7 @@ implementation {
 			return FALSE;
 		}
 		if((!TESTFLAG(flags, DATATASK))&&(!TESTFLAG(flags, FORWARDTASK))) {
-		
+
 			if(!forwardBuffer){
 				;//仅此一个入口向上进入应用层。
 			}else if (cmpDataPayload(currentForwardingDsn, packetDsn)){
@@ -1002,7 +972,7 @@ implementation {
 				call forwardPauseTimer.stop();
 				dbg("ORWTossimC", "%s JUDGING...RESEND REQUEST\n", sim_time_string());
 				return FALSE;
-			}else{ 
+			}else{
 				dbg("ORWTossimC", "other error, currentF:%d. descard\n", currentForwardingDsn);
 				post clearBuffer();
 				setVacantAck(msg);
@@ -1018,7 +988,10 @@ implementation {
 	event message_t * Receive.receive(message_t * msg, void * payload, uint8_t len) {//用于接收上一跳发来的信息，作为下游节点时触发
 		uint8_t forwarderid = getPktMessageSource(msg);
 		DataPayload * btrpkt = (DataPayload *) payload;
-		
+
+		energy++;
+		if(energy % 10 == 0)
+			dbg("Radio", "%s ENERGY %d.\n",sim_time_string(), energy);
 		shouldAck = TRUE;
 		if(len == sizeof(DataPayload)) {
 			{//=====================是否需要回复ack的判断处理，注意，先触发reveive再触发prepareAckAddtionalMsg=========
@@ -1028,7 +1001,7 @@ implementation {
 			}//=====================================END===========================================
 			{//================================应用层数据包的处理=================================
 				if((btrpkt->sourceid-TOS_NODE_ID == 0)||(forwarderid-TOS_NODE_ID == 0))	//接到自己转发出的包，丢弃
-					return msg;	
+					return msg;
 				btrpkt->hops += 1;
 				if(TOS_NODE_ID-1 == 0){
 					//sink 节点的处理
@@ -1061,7 +1034,7 @@ implementation {
 	event void RadioControl.stopDone(error_t error){
 		dbg("Radio", "%s RADIO STOPED.\n",sim_time_string());
 	}
-		
+
 
 	event void wakeTimer.fired(){//唤醒时长到，节点进入休眠
 		if(TOS_NODE_ID == 1)//sink节点不休眠
@@ -1077,31 +1050,31 @@ implementation {
 			//call wakeTimer.stop();//但是结束定时器，暗示已经超时
 			call wakeTimer.startOneShot(WAKE_PERIOD_MILLI);
 			return;
-		}	
+		}
 		//普通节点，结束一切任务（如果处在转发态，则判为丢包），进入休眠.注意，数据源节点也能充当普通节点
 		/*if(TESTFLAG(flags, FORWARDTASK))
 			post endForwardTask();*/
-			
+
 		call RadioControl.stop();
 		call sleepTimer.startOneShot(SLEEP_PERIOD_MILLI);
-		
+
 	}
 
 	event void sleepTimer.fired(){//休眠结束，唤醒节点
 		call RadioControl.start();
 	    call wakeTimer.startOneShot(WAKE_PERIOD_MILLI);
 	}
-	
+
 	event void packetTimer.fired() {
 		if(!TESTFLAG(flags, FORWARDTASK)){ //若有转发任务则该周期不产生数据
 			if(!(call wakeTimer.isRunning())){//如果节点处于休眠状态，立即唤醒
 				call sleepTimer.stop();
 				signal sleepTimer.fired();
 			}
-			post sendDataPayload();	
+			post sendDataPayload();
 		}
 	}
-	
+
 	/*数据包转发过程的上游节点触发
 	 * 连续发送待转数据包等待结束，判断是否需要继续重复转发
 	 */
@@ -1120,43 +1093,35 @@ implementation {
 			isForwardRequest = FALSE;
 			post forward();
 	}
-	
+
 	inline uint16_t convertEdc2uint(float edc){
-		//根据ORW,取edc为0.000-65.535,step0.1,转成int
+		//根据ORW,取edc为0.000-65.534,step0.1,转成int
 		int intedc = 0;
 		intedc = (int)(edc*1000);
-		if(edc>65.535f)
-			dbg("ORWTossimC","ERROR EDC=%f > 65.535!\n", edc);
-		intedc = (intedc>65535) ? 65535 : intedc;
+		if(edc>65.534f)
+			dbg("ORWTossimC","ERROR EDC=%f > 65.534!\n", edc);
+		intedc = (intedc>65534) ? 65534 : intedc;
 		return (uint16_t)intedc;
 	}
-	
+
 	inline float resumeEdc(uint16_t intedc){
 		return intedc/1000.0f;
 	}
-	
+
 	inline uint16_t convertLinkQ2uint(float linkq){
-		//映射到[0,65535]
-		int intlinkq = (int)(linkq*65535);
-		if(intlinkq>65535){
-			intlinkq = 65535;
-			dbg("ORWTossimC","ERROR linkq=%d > 65535!\n", linkq);
-		}
-		if(intlinkq<0){
-			intlinkq = 0;
-			dbg("ORWTossimC","ERROR linkq=%d < 0!\n", linkq);
-		}
+		//映射到[0,65534]
+		int intlinkq = (int)(linkq*65534);
 		return (uint16_t)(intlinkq);
 	}
-	
+
 	inline float resumeLinkQ(uint16_t intlinkq){
-		return ((float)intlinkq)/65535.0f;
+		return intlinkq/65534.0f;
 	}
-	
+
 	inline void noACK(){
 		shouldAck = FALSE;
 	}
-	
+
 	void setVacantAck(message_t* msg){
 		tossim_metadata_t* metadata = getPktMetadata(msg);
 		if(TOS_NODE_ID == 1){
@@ -1166,12 +1131,12 @@ implementation {
 		metadata->ackNode = 0xFF;
 		noACK();
 	}
-	
+
 	bool isDataAck(message_t* msg){
     	tossim_header_t* header = getPktHeader(msg);
     	return (header->type == DATAPAYLOAD);
     }
-    
+
 	event void NeighborDiscovery.PrepareAckAddtionalMsg(message_t* msg){
 		//接到其它节点发的probe包，需要回ack，准备额外携带的数据
 		tossim_metadata_t* metadata = getPktMetadata(msg);
@@ -1182,8 +1147,8 @@ implementation {
 		metadata->other1 = convertEdc2uint(nodeedc);
 		metadata->other2 = (uint16_t)WAKE_PERIOD_MILLI;//发送sleepperiod,由于uint8_t最大255，所以此处减去基
 	}
-  
-	event void NeighborDiscovery.AckAddtionalMsg(message_t* ackMessage){	
+
+	event void NeighborDiscovery.AckAddtionalMsg(message_t* ackMessage){
 		//节点收到其它节点回复自己probe包的ack，提取其中额外的数据
 		tossim_metadata_t* metadata = getPktMetadata(ackMessage);
 		float ackedc =  resumeEdc(metadata->other1);
@@ -1193,9 +1158,10 @@ implementation {
 		SETFLAG(flags, INITIALIZED);
 		post startDutyCycle();
 	}
-	
+
 	event void ACKs.PrepareAckAddtionalMsg(message_t* msg){
 		tossim_metadata_t* metadata = getPktMetadata(msg);
+		float linkq = 0.0f;
 		if(!isDataAck(msg))
 			return;
 		if(!shouldAck){
@@ -1204,13 +1170,17 @@ implementation {
 		}
 		metadata->ackNode = (uint8_t)TOS_NODE_ID;
 		metadata->other1 = convertEdc2uint(nodeedc);
-		metadata->other2 = convertLinkQ2uint(getLinkQ(getPktMessageSource(msg)));
+		linkq = getLinkQ(getPktMessageSource(msg));
+		if(linkq <= 0.0f){
+			setVacantAck(msg);
+			return;
+		}
+		metadata->other2 = convertLinkQ2uint(linkq);
 		metadata->other3 = (uint16_t)WAKE_PERIOD_MILLI;
-		dbg("ORWTossimC","prepare ack, linkq:%f\n", resumeLinkQ(metadata->other2));
 		post startForwardRequestPause();
 	}
-  
-	event void ACKs.AckAddtionalMsg(message_t* ackMessage){	
+
+	event void ACKs.AckAddtionalMsg(message_t* ackMessage){
 		tossim_metadata_t* metadata = getPktMetadata(ackMessage);
 		uint8_t requester = metadata->ackNode;
 		float requesterEdc;
@@ -1234,5 +1204,5 @@ implementation {
 		if(requester == 1)
 			sinkacked = TRUE;
 	}
-	
+
 }

@@ -17,8 +17,13 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 
 Description：
 	新提出的协议的Tossim仿真模拟实现.
-	对比ORW版本:1.6
+	对比ORW版本:1.9
 
 Change Log：
-	V1.7 TOSSIM仿真头文件TossimRadioMsg.h中，将other1,other2,other3域的类型由
+	V1.7 a.新metric的计算方式，在生成forwardlist时依次加入
+		 b.增加收发包的总次数计数，以便计算能耗
+		 c.重传间隔调整，根据average Qs整数倍往上涨
+		 d.metric考察的时长扩大到20*睡眠周期
+		 e.修改链路质量Qs联合概率计算公式
+	V1.6 TOSSIM仿真头文件TossimRadioMsg.h中，将other1,other2,other3域的类型由
 	uint8_t扩展到uint16_t,以满足程序需求。
