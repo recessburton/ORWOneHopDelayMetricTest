@@ -1,10 +1,10 @@
 /**
  Copyright (C),2014-2017, YTC, www.bjfulinux.cn
  Copyright (C),2014-2017, ENS Lab, ens.bjfu.edu.cn
- Created on  2017-07-31 09:11
+ Modified on  2017-09-19 10:45
 
  @author: ytc recessburton@gmail.com
- @version: V1.7
+ @version: V1.8
 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -160,7 +160,8 @@ implementation {
 	/**
 	 * 两个NeighborSet结构体的比较函数.
 	 *
-	 * 比较两个NeighborSet结构体中edc成员的大小，用于NeighborSet列表的排序.
+	 * 比较两个NeighborSet结构体的大小，用于NeighborSet列表的排序.
+	 * 比较大小标准，使用该节点的edc值加上休眠周期/2,即edc+sleepperiod/2,为浮点数.
 	 *
 	 * @param a   待比较的第一个结构体
 	 * @param b   待比较的第二个结构体
@@ -612,7 +613,7 @@ implementation {
 		bool cal = TRUE;
 		if(neighborsize >= 1)
 			nodeedc = FLT_MAX;
- 		for(i = 0;i<neighborsize;i++){
+ 		for(i = 0;i<neighborsize;i++){//按照EDC排序过后逐个加入节点计算edc，直到本节点edc出现上升
 				currentedc = FLT_MAX;
 				neighbornode = (NeighborSet*)list_get_at(&neighborSet, i);
 				if(cal){		
@@ -623,16 +624,18 @@ implementation {
 					onehopdelay = updateOneHopDelay(i);
 					currentedc = onehopdelay + WeighedSigmaPi/SigmaPi;
 				}
-				if(currentedc < nodeedc){
+				if(currentedc < nodeedc){//加入新节点后edc值下降，即该考察的节点是可用的
 					nodeedc = currentedc;
 					neighbornode->use = TRUE;
 					maxForwarderNo = i+1;
-				}else{
+				}else{//加入了新节点后edc值上升，表明该节点（及以下）不该被加入forwardlist
 					cal = FALSE;
 					neighbornode->use = FALSE;
 				}
+				//至此，节点edc曲线到了最低点，即此时节点edc值可以达到最小，edc计算完成（参考ORW论文）
 				dbg("Neighbor", "NeighborSet #%d:Node %d, EDC %f, LQ %f, is use:%d\n",i+1,neighbornode->nodeid,neighbornode->edc,neighbornode->p,neighbornode->use);
 		}
+		//maxForwardNo代表节点最大可用邻居节点数
 		dbg("Neighbor", "%s Node EDC %f, maxForwarderNo %d.\n",sim_time_string(),nodeedc,maxForwarderNo);
 		neighbornode = NULL;
 	}
@@ -644,7 +647,7 @@ implementation {
 		flags = ((unsigned int)(call Random.rand16())%100)/PAYLOAD_PRODUCE_RATIO==0 ? (flags | PAYLOADSOURCE) : (flags & ~PAYLOADSOURCE);
 		SETFLAG(flags, SLEEPALLOWED);		//启用休眠机制
 		//UNSETFLAG(flags, SLEEPALLOWED);	//关闭休眠机制
-		WAKE_PERIOD_MILLI = WAKE_PERIOD_MILLI_BASE + (call Random.rand16())%100;//初始化随机休眠周期
+		WAKE_PERIOD_MILLI = WAKE_PERIOD_MILLI_BASE + (unsigned int)(call Random.rand16())%100;//初始化随机休眠周期
 		call RadioControl.start();
 		if(TOS_NODE_ID == 1){
 			SETFLAG(flags, INITIALIZED);	//sink节点一开始就是初始化的
@@ -689,7 +692,14 @@ implementation {
 
 	int cmpNeighborSetByEDC(const void *a, const void *b){
 		//使用simclist库中list_sort()函数所用的比较函数element_comparator
+		NeighborSet* nodea = (NeighborSet *)a;
+		NeighborSet* nodeb = (NeighborSet *)b;
+		float cmpMetrica = nodea->edc + nodea->sleepperiod/2.0f;
+		float cmpMetricb = nodeb->edc + nodeb->sleepperiod/2.0f;
+		return cmpMetrica > cmpMetricb ? -1 : 1;
+		/** 原比较标准（只比edc）
 		return (*(NeighborSet *)a).edc > (*(NeighborSet *)b).edc ? -1 : 1;
+		 * */
 	}
 
 	int matchIDinNeighborSet(const void *el, const void *indicator){
@@ -847,8 +857,8 @@ implementation {
 		list_t timeintervallist;//Is:As的一阶差分，有节点醒来的时间间隔，考察时间范围MAX_REPLICA_COUNT*SLEEP_PERIOD_MILLI
 		float probability=0.0f;
 		int timeinterval=0;
-		float averageQs=0.0f;
 		float averageIs=0.0f;
+		float averageQs=0.0f;
 		int sumIs=0;
 		float sumQs=0.0f;
 		float onehopdelay = 0.0f;
@@ -881,7 +891,7 @@ implementation {
 		list_destroy(&brother);
 
 		//calculate one hop delay
-		//formula: avg(Is)/avg(Qs)-avg(Is)/2
+		//formula: avg(Is)/avg(Qs) - avg(Is)/2
 		for (i=0;i<list_size(&qualitylist);i++){
 			sumQs += *(float*)list_get_at(&qualitylist, i);
 		}

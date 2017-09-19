@@ -1,10 +1,10 @@
 /**
  Copyright (C),2014-2017, YTC, www.bjfulinux.cn
  Copyright (C),2014-2017, ENS Lab, ens.bjfu.edu.cn
- Created on  2017-07-31 09:11
- 
+ Modified on  2017-09-19 10:45
+
  @author: ytc recessburton@gmail.com
- @version: 1.7
+ @version: V1.8
  
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions

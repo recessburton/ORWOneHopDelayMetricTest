@@ -17,9 +17,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 
 Description：
 	新提出的协议的Tossim仿真模拟实现.
-	对比ORW版本:1.9
+	对比ORW版本:1.9.1
 
 Change Log：
+	V1.8 修改生成forwardlist时各个邻居节点加入时的次序，由单edc改成综合考察
 	V1.7 a.新metric的计算方式，在生成forwardlist时依次加入
 		 b.增加收发包的总次数计数，以便计算能耗
 		 c.重传间隔调整，根据average Qs整数倍往上涨
